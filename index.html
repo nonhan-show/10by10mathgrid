@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>アーケード百ます計算</title>
+  
+  <style>
+    /* 画面全体をロック */
+    html, body { 
+      width: 100%; height: 100%; height: 100dvh; overflow: hidden; margin: 0; padding: 0;
+      font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #222; color: #333; 
+      -webkit-text-size-adjust: 100%; touch-action: none;
+    }
+
+    /* アプリ全体 */
+    .game-container { 
+      display: flex; flex-direction: column; width: 100vw; max-width: 600px; height: 100dvh;
+      background: #fff; margin: 0 auto; position: relative; z-index: 10;
+    }
+
+    /* 1. 上ブロック：ヘッダー（固定） */
+    .header-area { 
+      flex: 0 0 auto; background: #fff; padding: 10px; z-index: 20; 
+      box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    .header-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    #action-btn { padding: 8px 16px; font-size: 1.1rem; cursor: pointer; background-color: #007bff; color: white; border: none; border-radius: 8px; font-weight: bold; }
+    #action-btn.score-mode { background-color: #28a745; }
+    #timer-display { font-size: 1.5rem; font-weight: bold; font-variant-numeric: tabular-nums; }
+    #active-problem-hud {
+      font-size: 1.6rem; font-weight: bold; color: #ff5722; text-align: center; 
+      height: 2.2rem; line-height: 2.2rem; background: #fff3e0; border-radius: 8px; border: 2px dashed #ff9800;
+    }
+
+    /* 2. 中ブロック：マス目エリア（★バグの根源を完全修正★） */
+    .grid-wrapper {
+      flex: 1 1 0%; min-height: 0; 
+      display: flex; justify-content: center; 
+      align-items: flex-start; /* ★上揃えを強制！絶対に上が見切れなくなります★ */
+      padding: 10px; background: #f4f4f9; 
+      overflow-y: auto; overflow-x: hidden; /* はみ出した場合は安全に縦スクロールさせる */
+    }
+
+    .grid-container { 
+      width: 100%; 
+      max-width: calc(100vh - 360px); /* 古いiOS用 */
+      max-width: calc(100dvh - 360px); /* 最新iOS用 */
+      aspect-ratio: 1 / 1; /* 親枠を完璧な正方形に固定 */
+      margin: 0 auto; /* ★上下の自動マージンを禁止！これで上に押し上げられるバグが消滅します★ */
+      display: grid; grid-template-columns: repeat(11, 1fr); grid-template-rows: repeat(11, 1fr);
+      gap: 1px; background-color: #bbb; border: 1px solid #bbb; 
+    }
+
+    .cell { 
+      display: flex; align-items: center; justify-content: center; 
+      font-size: clamp(10px, 3.5vw, 22px); background-color: #fff; font-weight: bold; 
+    }
+    .header-cell { background-color: #e9ecef; color: #333; }
+    .top-row-cell, .top-left-cell { position: sticky; top: 0; z-index: 5; }
+    .left-col-cell { position: sticky; left: 0; z-index: 5; }
+
+    .input-cell { color: #000; cursor: pointer; text-align: center; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;}
+    .input-cell.active { background-color: #e6f7ff; box-shadow: inset 0 0 0 3px #007bff; }
+    .input-cell.correct { background-color: #d4edda; color: #155724; }
+    .input-cell.wrong { background-color: #f8d7da; color: #721c24; }
+
+    /* 3. 下ブロック：キーボード（固定） */
+    #custom-keypad {
+      flex: 0 0 auto; background: #e9ecef; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; 
+      padding: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom));
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.05); z-index: 20;
+    }
+    .key-btn {
+      background: #fff; border: none; border-radius: 8px; font-size: 1.8rem; font-weight: bold;
+      height: 55px; box-shadow: 0 2px 0 #ccc; display: flex; align-items: center; justify-content: center; user-select: none;
+    }
+    .key-btn:active { transform: translateY(2px); box-shadow: none; }
+    .key-btn.btn-del { background: #ffcccc; color: #d8000c; font-size: 1.4rem; }
+    .key-btn.btn-next { background: #cce5ff; color: #004085; font-size: 1.4rem; }
+
+    /* エフェクト・リザルト画面 */
+    #combo-display { position: absolute; top: 10px; right: 20px; font-weight: bold; opacity: 0; z-index: 30; pointer-events: none; transition: color 0.3s, text-shadow 0.3s, font-size 0.2s; color: #ff5722; text-shadow: 2px 2px 0px #fff, -1px -1px 0px #fff; font-size: 2rem; }
+    @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.4); } 100% { transform: scale(1); } }
+    .pop-anim { animation: pop 0.2s ease-out; }
+    .combo-tier-1 { color: #00ffff !important; text-shadow: 0 0 10px #00ffff, 2px 2px 0px #000 !important; font-size: 2.2rem !important; }
+    .fever-tier-1 { box-shadow: inset 0 0 30px #00ffff !important; }
+    .combo-tier-2 { color: #ff00ff !important; text-shadow: 0 0 15px #ff00ff, 2px 2px 0px #000 !important; font-size: 2.5rem !important; }
+    .fever-tier-2 { box-shadow: inset 0 0 40px #ff00ff !important; }
+    .combo-tier-3 { color: #ffd700 !important; text-shadow: 0 0 20px #ff4500, 2px 2px 0px #000 !important; font-size: 3.2rem !important; }
+    .fever-tier-3 { box-shadow: inset 0 0 50px #ff4500, inset 0 0 80px #ffd700 !important; }
+    @keyframes rainbowBox { 0%{box-shadow: inset 0 0 50px #ff0000;} 33%{box-shadow: inset 0 0 50px #00ff00;} 66%{box-shadow: inset 0 0 50px #0000ff;} 100%{box-shadow: inset 0 0 50px #ff0000;} }
+    @keyframes shakeScreen { 0% {transform: translate(1px, 1px) rotate(0deg);} 25% {transform: translate(-1px, -1px) rotate(-0.5deg);} 50% {transform: translate(-1px, 1px) rotate(0.5deg);} 75% {transform: translate(1px, -1px) rotate(-0.5deg);} 100% {transform: translate(1px, 1px) rotate(0deg);} }
+    .combo-tier-max { background: linear-gradient(to right, #ff0000, #ff8800, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff); -webkit-background-clip: text; color: transparent !important; filter: drop-shadow(0 0 10px #fff); font-size: 4rem !important; }
+    .fever-tier-max { animation: rainbowBox 1s linear infinite, shakeScreen 0.2s infinite !important; }
+
+    #result-overlay { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); z-index: 100; flex-direction: column; align-items: center; justify-content: center; color: white; text-align: center; }
+    .boss-icon { font-size: 120px; text-shadow: 0 0 20px rgba(255,0,0,0.8); margin-bottom: 20px; }
+    .damage-text { font-size: 2rem; font-weight: bold; color: #ff3366; margin-bottom: 10px; }
+    .critical-text { font-size: 2.5rem; color: #ffd700; font-weight: bold; display: none; }
+    .rank-stamp { font-size: 6rem; font-weight: bold; margin-top: 20px; opacity: 0; transform: scale(3); }
+    .rank-stamp.show { opacity: 1; transform: scale(1); transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    .rank-S { color: #ffd700; } .rank-A { color: #ff4500; } .rank-B { color: #1e90ff; } .rank-C { color: #32cd32; }
+    .result-buttons { display: flex; gap: 15px; margin-top: 30px; z-index: 101; }
+    .close-result-btn { padding: 12px 24px; font-size: 1.2rem; font-weight: bold; cursor: pointer; border-radius: 8px; border: none; background: #fff; color: #333; }
+    .share-x-btn { padding: 12px 24px; font-size: 1.2rem; font-weight: bold; cursor: pointer; border-radius: 8px; border: none; background: #0f1419; color: #fff; display: flex; align-items: center; gap: 8px; }
+
+    .confetti { position: absolute; width: 12px; height: 12px; top: -20px; animation: fall linear forwards; }
+    @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+    .shake-anim { animation: shake 0.3s; }
+    @keyframes shake { 0% { transform: translateX(0); } 25% { transform: translateX(-10px); } 50% { transform: translateX(10px); } 75% { transform: translateX(-10px); } 100% { transform: translateX(0); } }
+  </style>
+</head>
+
+<body>
+  <div class="game-container" id="game-container">
+    <div id="combo-display">0 COMBO!</div>
+    
+    <div class="header-area">
+      <div class="header-controls">
+        <select id="operator-select" style="font-size: 1.1rem; padding: 5px;">
+          <option value="+">足し算 (+)</option>
+          <option value="-">引き算 (-)</option>
+          <option value="*">掛け算 (×)</option>
+          <option value="/">割り算 (÷)</option>
+        </select>
+        <button id="action-btn">スタート</button>
+        <div id="timer-display">00:00.0</div>
+      </div>
+      <div id="active-problem-hud">「スタート」を押してね！</div>
+    </div>
+    
+    <div class="grid-wrapper">
+      <div id="grid-container" class="grid-container"></div>
+    </div>
+    
+    <div id="custom-keypad">
+      <button class="key-btn" data-key="1">1</button><button class="key-btn" data-key="2">2</button><button class="key-btn" data-key="3">3</button>
+      <button class="key-btn" data-key="4">4</button><button class="key-btn" data-key="5">5</button><button class="key-btn" data-key="6">6</button>
+      <button class="key-btn" data-key="7">7</button><button class="key-btn" data-key="8">8</button><button class="key-btn" data-key="9">9</button>
+      <button class="key-btn btn-next" data-key="Enter">次へ</button>
+      <button class="key-btn" data-key="0">0</button>
+      <button class="key-btn btn-del" data-key="Backspace">消す</button>
+    </div>
+  </div>
+
+  <div id="result-overlay">
+    <div class="boss-icon" id="boss-icon">👿</div>
+    <div class="critical-text" id="critical-text">かいしんのいちげき！！</div>
+    <div class="damage-text" id="damage-text">ダメージ: 0</div>
+    <div class="rank-stamp" id="rank-stamp">S</div>
+    <div class="result-buttons">
+      <button class="share-x-btn" onclick="shareOnX()">𝕏 シェア</button>
+      <button class="close-result-btn" onclick="closeResult()">閉じる</button>
+    </div>
+  </div>
+
+  <script>
+  const gridContainer = document.getElementById('grid-container');
+  const actionBtn = document.getElementById('action-btn');
+  const operatorSelect = document.getElementById('operator-select');
+  const timerDisplay = document.getElementById('timer-display');
+  const gameContainer = document.getElementById('game-container');
+  const comboDisplay = document.getElementById('combo-display');
+  const activeHud = document.getElementById('active-problem-hud');
+
+  let timerInterval, startTime, isPlaying = false;
+  let lastInputTime = 0, currentCombo = 0, maxCombo = 0;
+  let inputCells = [], activeCellIndex = -1;
+
+  function generateNumbers(op) {
+    let topNums = [], leftNums = [];
+    if (op === '+') {
+      topNums = [0,1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+      leftNums = [0,1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+    } else if (op === '-') {
+      let base = [10,11,12,13,14,15,16,17,18,19,20].sort(() => Math.random() - 0.5);
+      topNums = base.slice(0, 10);
+      leftNums = [0,1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+    } else if (op === '*') {
+      topNums = [0,1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+      leftNums = [0,1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+    } else if (op === '/') {
+      let divisors = [1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
+      leftNums = divisors.slice(0, 10);
+      topNums = leftNums.map(d => {
+        let possibleQuotients = [1,2,3,4,5,6,7,8,9,10].filter(q => q * d <= 20);
+        let q = possibleQuotients[Math.floor(Math.random() * possibleQuotients.length)];
+        return q * d;
+      });
+    }
+    return { topNums, leftNums };
+  }
+
+  function calculateAnswer(topNum, leftNum, op) {
+    if (op === '+') return topNum + leftNum;
+    if (op === '-') return topNum - leftNum;
+    if (op === '*') return topNum * leftNum;
+    if (op === '/') return Math.floor(topNum / leftNum);
+    return 0;
+  }
+
+  function generateGrid() {
+    gridContainer.innerHTML = '';
+    inputCells = [];
+    const operator = operatorSelect.value;
+    const { topNums, leftNums } = generateNumbers(operator);
+    
+    let displayOp = '+';
+    if (operator === '-') displayOp = '-';
+    if (operator === '*') displayOp = '×';
+    if (operator === '/') displayOp = '÷';
+    
+    for (let row = 0; row < 11; row++) {
+      for (let col = 0; col < 11; col++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        
+        if (row === 0 && col === 0) {
+          cell.classList.add('header-cell', 'top-row-cell', 'left-col-cell'); cell.textContent = displayOp;
+        } else if (row === 0) {
+          cell.classList.add('header-cell', 'top-row-cell'); cell.textContent = topNums[col - 1];
+        } else if (col === 0) {
+          cell.classList.add('header-cell', 'left-col-cell'); cell.textContent = leftNums[row - 1];
+        } else {
+          cell.classList.add('input-cell'); 
+          const topN = topNums[col - 1];
+          const leftN = leftNums[row - 1];
+          const answer = calculateAnswer(topN, leftN, operator);
+          
+          cell.dataset.answer = answer;
+          cell.dataset.expectedLength = String(answer).length;
+          cell.dataset.problem = `${topN} ${displayOp} ${leftN} = ?`;
+          
+          const currentIndex = inputCells.length;
+          cell.addEventListener('click', () => { if(isPlaying) setActiveCell(currentIndex); });
+          
+          inputCells.push(cell);
+          cell.appendChild(document.createTextNode(''));
+        }
+        gridContainer.appendChild(cell);
+      }
+    }
+  }
+
+  function setActiveCell(index) {
+    if (index >= inputCells.length) return;
+    if (activeCellIndex >= 0 && activeCellIndex < inputCells.length) {
+      inputCells[activeCellIndex].classList.remove('active');
+    }
+    activeCellIndex = index;
+    const cell = inputCells[activeCellIndex];
+    cell.classList.add('active');
+    activeHud.textContent = cell.dataset.problem;
+  }
+
+  function handleKeyPress(key) {
+    if (!isPlaying || activeCellIndex < 0) return;
+    const cell = inputCells[activeCellIndex];
+    
+    if (key === 'Backspace') {
+      cell.textContent = cell.textContent.slice(0, -1);
+    } else if (key === 'Enter') {
+      handleCombo();
+      setActiveCell(activeCellIndex + 1);
+    } else if (/[0-9]/.test(key)) {
+      cell.textContent += key;
+      if (cell.textContent.length >= cell.dataset.expectedLength) {
+        handleCombo();
+        setActiveCell(activeCellIndex + 1);
+      }
+    }
+  }
+
+  document.querySelectorAll('.key-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      handleKeyPress(btn.dataset.key);
+    });
+  });
+  document.addEventListener('keydown', (e) => {
+    if (isPlaying && (/[0-9]/.test(e.key) || e.key === 'Backspace' || e.key === 'Enter')) {
+      e.preventDefault(); handleKeyPress(e.key);
+    }
+  });
+
+  function handleCombo() {
+    const now = Date.now();
+    if (lastInputTime > 0 && (now - lastInputTime) < 3000) {
+      currentCombo++; if(currentCombo > maxCombo) maxCombo = currentCombo;
+    } else { currentCombo = 1; }
+    lastInputTime = now;
+    
+    if (currentCombo > 1) {
+      comboDisplay.textContent = currentCombo + ' COMBO!';
+      comboDisplay.style.opacity = 1;
+      comboDisplay.className = ''; gameContainer.className = 'game-container';
+      
+      if (currentCombo >= 50) { comboDisplay.classList.add('combo-tier-max'); gameContainer.classList.add('fever-tier-max'); }
+      else if (currentCombo >= 30) { comboDisplay.classList.add('combo-tier-3'); gameContainer.classList.add('fever-tier-3'); }
+      else if (currentCombo >= 20) { comboDisplay.classList.add('combo-tier-2'); gameContainer.classList.add('fever-tier-2'); }
+      else if (currentCombo >= 10) { comboDisplay.classList.add('combo-tier-1'); gameContainer.classList.add('fever-tier-1'); }
+      
+      void comboDisplay.offsetWidth; comboDisplay.classList.add('pop-anim');
+    } else {
+      comboDisplay.style.opacity = 0; comboDisplay.className = ''; gameContainer.className = 'game-container';
+    }
+  }
+
+  function updateTimer() {
+    const diff = new Date(Date.now() - startTime);
+    timerDisplay.textContent = `${String(diff.getMinutes()).padStart(2, '0')}:${String(diff.getSeconds()).padStart(2, '0')}.${Math.floor(diff.getMilliseconds() / 100)}`;
+  }
+
+  function scoreGame() {
+    clearInterval(timerInterval); isPlaying = false;
+    comboDisplay.style.opacity = 0; comboDisplay.className = ''; gameContainer.className = 'game-container';
+    activeHud.textContent = '採点完了！';
+    if (activeCellIndex >= 0 && activeCellIndex < inputCells.length) inputCells[activeCellIndex].classList.remove('active');
+    
+    let correctCount = 0;
+    inputCells.forEach(cell => {
+      if (cell.textContent.trim() === String(cell.dataset.answer)) { cell.classList.add('correct'); correctCount++; }
+      else { cell.classList.add('wrong'); }
+    });
+    
+    const totalSeconds = (Date.now() - startTime) / 1000;
+    showResult(correctCount, totalSeconds, maxCombo);
+    actionBtn.textContent = 'リセット'; actionBtn.className = 'reset-mode';
+  }
+
+  function showResult(correct, seconds, combo) {
+    const overlay = document.getElementById('result-overlay'), boss = document.getElementById('boss-icon');
+    const damageTxt = document.getElementById('damage-text'), criticalTxt = document.getElementById('critical-text');
+    const rankStamp = document.getElementById('rank-stamp');
+    
+    overlay.style.display = 'flex';
+    let timeBonus = Math.max(0, (300 - seconds) * 10), comboBonus = combo * 50;
+    let baseDamage = (correct * 100) + timeBonus + comboBonus;
+    let totalDamage = Math.floor(correct === 100 ? baseDamage * 1.5 : baseDamage * (correct/100));
+
+    boss.classList.add('shake-anim'); setTimeout(() => boss.classList.remove('shake-anim'), 300);
+    
+    let currentDmg = 0, step = Math.ceil(totalDamage / 30);
+    let dmgInterval = setInterval(() => {
+      currentDmg += step;
+      if(currentDmg >= totalDamage) {
+        currentDmg = totalDamage; clearInterval(dmgInterval);
+        if (correct === 100) { criticalTxt.style.display = 'block'; boss.textContent = '💀'; }
+        else { criticalTxt.style.display = 'none'; boss.textContent = '👿'; }
+        
+        let rank = 'C'; rankStamp.className = 'rank-stamp';
+        if (correct === 100 && seconds <= 90) { rank = 'S'; rankStamp.classList.add('rank-S'); throwConfetti(); }
+        else if (correct >= 95 && seconds <= 150) { rank = 'A'; rankStamp.classList.add('rank-A'); }
+        else if (correct >= 80) { rank = 'B'; rankStamp.classList.add('rank-B'); }
+        else { rankStamp.classList.add('rank-C'); }
+        
+        rankStamp.textContent = 'Rank: ' + rank; rankStamp.classList.add('show');
+        
+        const opText = operatorSelect.options[operatorSelect.selectedIndex].text;
+        window.shareData = { op: opText, time: timerDisplay.textContent, correct: correct, combo: combo, rank: rank };
+      }
+      damageTxt.textContent = `ダメージ: ${currentDmg.toLocaleString()}`;
+    }, 30);
+  }
+
+  function shareOnX() {
+    if (!window.shareData) return;
+    const text = `【アーケード百ます計算】\n${window.shareData.op}に挑戦！\n\n🕒 タイム: ${window.shareData.time}\n✅ 正解数: ${window.shareData.correct}/100\n🔥 最大コンボ: ${window.shareData.combo}\n👑 ランク: ${window.shareData.rank}\n\n#百ます計算`;
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(window.location.href)}`;
+    window.open(url, '_blank');
+  }
+
+  function throwConfetti() {
+    const overlay = document.getElementById('result-overlay');
+    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'];
+    for(let i=0; i<80; i++) {
+      let conf = document.createElement('div'); conf.className = 'confetti';
+      conf.style.left = Math.random() * 100 + 'vw';
+      conf.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+      conf.style.animationDuration = (Math.random() * 2 + 2) + 's'; conf.style.animationDelay = Math.random() * 1 + 's';
+      overlay.appendChild(conf);
+    }
+  }
+  function closeResult() {
+    document.getElementById('result-overlay').style.display = 'none';
+    document.getElementById('rank-stamp').classList.remove('show');
+    document.querySelectorAll('.confetti').forEach(e => e.remove());
+  }
+
+  operatorSelect.addEventListener('change', () => {
+    if (!isPlaying) {
+      generateGrid();
+      activeHud.textContent = '「スタート」を押してね！';
+    }
+  });
+
+  actionBtn.addEventListener('click', () => {
+    if (actionBtn.textContent === 'スタート') {
+      isPlaying = true; currentCombo = 0; maxCombo = 0; lastInputTime = 0;
+      comboDisplay.style.opacity = 0; comboDisplay.className = ''; gameContainer.className = 'game-container';
+      
+      const cells = document.querySelectorAll('.input-cell');
+      cells.forEach(c => c.textContent = '');
+      
+      setActiveCell(0);
+      startTime = Date.now(); timerInterval = setInterval(updateTimer, 100);
+      actionBtn.textContent = '採点する'; actionBtn.className = 'score-mode';
+    } 
+    else if (actionBtn.textContent === '採点する') { scoreGame(); }
+    else if (actionBtn.textContent === 'リセット') {
+      timerDisplay.textContent = '00:00.0'; actionBtn.textContent = 'スタート'; actionBtn.className = '';
+      activeHud.textContent = '「スタート」を押してね！'; generateGrid(); 
+    }
+  });
+
+  generateGrid();
+  </script>
+</body>
+</html>
